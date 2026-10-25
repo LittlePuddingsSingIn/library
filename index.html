@@ -123,6 +123,8 @@
   .linkpanel select, .linkpanel input[type=text]{width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; margin:4px 0 10px; font-size:1rem;}
   .code{font-family:monospace; font-size:.85rem; color:var(--grey);}
 
+  .toast{position:fixed; left:50%; top:76px; transform:translateX(-50%); max-width:90%; background:#fff; border:2px solid var(--gold); border-radius:12px; padding:12px 18px; font-size:1.05rem; box-shadow:0 4px 14px rgba(0,0,0,.15); z-index:50; display:none; text-align:center;}
+  .toast.on{display:block;}
   @media (max-width:640px){
     .bigrow{grid-template-columns:1fr;}
     .bigbtn{font-size:1.3rem; padding:18px 12px;}
@@ -142,6 +144,7 @@
 </header>
 
 <main>
+  <div id="toast" class="toast" role="status"></div>
   <!-- HOME -->
   <section class="screen on" id="scrHome">
     <div class="bigrow">
@@ -273,7 +276,7 @@
 /* =====================================================
    CONFIG: same Microsoft app as the OTJ and planning tools
    ===================================================== */
-const BUILD = "2026-10-25a";
+const BUILD = "2026-10-25b";
 const CLIENT_ID    = "5a871fc6-d672-401e-a5a7-f9fb349ecc99";
 const TENANT_ID    = "a824d7c9-201d-4ae2-afea-e75389e576f0";
 const REDIRECT_URI = "https://littlepuddingssingin.github.io/library/";
@@ -291,7 +294,7 @@ const FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e"];
 /* ===================== State ===================== */
 const LS_KEY = "lp-library-v1";
 const LS_CAM = "lp-library-camera";
-function blank(){ return { dataVersion:1, books:[], loans:[], settings:{ staffPin:"0000", pinChanged:false, overdueDays:14, updatedAt:0 } }; }
+function blank(){ return { dataVersion:1, books:[], loans:[], settings:{ staffPin:"0000", pinChanged:false, overdueDays:14, soundOn:true, updatedAt:0 } }; }
 let state = loadLocal() || blank();
 normalise();
 let account = null, role = "local", sharedDrive = null, saveTimer = null;
@@ -566,16 +569,16 @@ function setScanMsg(text, cls){ const m = $("scanMsg"); m.className = "scanmsg" 
 function onFamilyScan(code){
   armIdle();
   const copies = booksByCode(code);
-  if (!copies.length){ setScanMsg("We don't know that barcode yet. Please tap Choose the book, or ask a member of staff.", "warn"); return; }
+  if (!copies.length){ sound("err"); setScanMsg("We don't know that barcode yet. Please tap Choose the book, or ask a member of staff.", "warn"); return; }
   const title = copies[0].title;
   if (mode === "borrow"){
     const free = copies.find(b => !b.missing && !openLoan(b.id));
-    if (!free){ setScanMsg(title + " is already signed out. If you are bringing it back, tap Cancel, then Return a book.", "warn"); return; }
-    pickBook(free);
+    if (!free){ sound("err"); setScanMsg(title + " is already signed out. If you are bringing it back, tap Cancel, then Return a book.", "warn"); return; }
+    sound("scan"); pickBook(free);
   } else {
     const outCopy = copies.find(b => openLoan(b.id));
-    if (!outCopy){ setScanMsg(title + " is already on the shelf, so there is nothing to return. Thank you!", "warn"); return; }
-    pickBook(outCopy);
+    if (!outCopy){ sound("err"); setScanMsg(title + " is already on the shelf, so there is nothing to return. Thank you!", "warn"); return; }
+    sound("scan"); pickBook(outCopy);
   }
 }
 function pickBook(b){
@@ -618,7 +621,7 @@ function confirmBorrow(){
   if (openLoan(chosen.id)){ go("home"); return; }
   const t = now();
   state.loans.push({ id: uid(), bookId: chosen.id, title: chosen.title, initials: iniBuf, outAt: t, backAt: null, updatedAt: t });
-  markDirty();
+  markDirty(); sound("done");
   $("doneTitle").textContent = "Happy reading!";
   $("doneText").textContent = chosen.title + " is signed out to " + iniBuf + ". Please bring it back with the Talking Book.";
   go("done");
@@ -626,7 +629,7 @@ function confirmBorrow(){
 function confirmReturn(){
   if (!chosen) return;
   const l = openLoan(chosen.id); if (!l){ go("home"); return; }
-  l.backAt = now(); l.updatedAt = now(); markDirty();
+  l.backAt = now(); l.updatedAt = now(); markDirty(); sound("done");
   $("doneTitle").textContent = "Thank you!";
   $("doneText").textContent = chosen.title + " is back on the shelf, ready for another friend.";
   go("done");
@@ -743,6 +746,7 @@ function renderSettings(){
       '<button class="btn small" id="btnSignIn">Connect to OneDrive</button>') + '</div>';
   h += '<div class="card"><h2>Library settings</h2>' +
     '<div class="row"><label for="odDays">Highlight books out for</label><input type="number" id="odDays" min="1" max="90" value="' + (state.settings.overdueDays||14) + '" style="width:70px;padding:6px;border:1px solid var(--line);border-radius:6px;"><span>days or more</span></div>' +
+    '<div class="row"><span>Sounds:</span><b>' + (state.settings.soundOn === false ? "Off" : "On") + '</b><button class="btn small secondary" id="btnSound">' + (state.settings.soundOn === false ? "Turn on" : "Turn off") + '</button><button class="btn small secondary" id="btnSoundTest">Play test</button></div>' +
     '<div class="row"><span>Camera for scanning:</span><b>' + (camFacing() === "user" ? "Front (screen side)" : "Back") + '</b><button class="btn small secondary" id="btnCamSetting">Switch</button></div>' +
     '<div class="row"><button class="btn small secondary" id="btnChangePin">Change staff PIN</button></div></div>';
   h += '<div class="card"><h2>Backup</h2><p class="note">A backup is one file holding every book and every loan. OneDrive keeps its own copy, but a backup is handy before big changes.</p>' +
@@ -754,6 +758,7 @@ function renderSettings(){
     '<li>On the tablet, open <code>' + esc(REDIRECT_URI) + '</code> in a second tab, open Staff, and connect with your work account. The folder <code>' + esc(FOLDER_NAME) + '</code> is created the first time something is saved.</li>' +
     '<li>If the tablet uses a different work account from yours, share that folder with it with <b>Can edit</b> rights.</li>' +
     '<li>The first time anyone scans, the tablet asks to use the camera. Tap Allow.</li>' +
+    '<li>A hand-held barcode scanner works too: pair it with the tablet as a keyboard (HID mode). Families can scan a book on any screen and the app works out whether it is going out or coming back.</li>' +
     '</ol><p class="note">Build ' + BUILD + '</p></details></div>';
   $("tab-settings").innerHTML = h;
 }
@@ -787,6 +792,7 @@ async function lookupTitle(isbn){
 async function onStaffScan(code){
   armIdle();
   if (pending) return;
+  sound("scan");
   const linked = booksByCode(code);
   if (sscanFor){
     const b = bookById(sscanFor);
@@ -860,6 +866,8 @@ $("scrStaff").addEventListener("click", e => {
   if (t.id === "btnSignIn") return signIn();
   if (t.id === "btnSignOut"){ if (confirm("Disconnect this device from OneDrive?")) signOut(); return; }
   if (t.id === "btnSyncNow") return syncFromCloud();
+  if (t.id === "btnSound"){ state.settings.soundOn = state.settings.soundOn === false; state.settings.updatedAt = now(); markDirty(); renderSettings(); if (state.settings.soundOn) sound("done"); return; }
+  if (t.id === "btnSoundTest"){ sound("scan"); setTimeout(() => sound("done"), 500); setTimeout(() => sound("err"), 1500); return; }
   if (t.id === "btnCamSetting"){ flipCamera(); renderSettings(); return; }
   if (t.id === "btnChangePin"){ pinStage = "new"; pinBuf = ""; $("pinTitle").textContent = "Choose a new staff PIN";
     $("pinHint").textContent = "Choose a 4 to 6 digit PIN."; $("pinMsg").textContent = ""; renderPin(); staffUnlocked = true; go("pin"); return; }
@@ -908,6 +916,68 @@ function restoreBackup(file){
     }catch(e){ alert("Could not restore: " + e.message); }
   };
   r.readAsText(file);
+}
+
+/* ===================== Sounds ===================== */
+let actx = null;
+function audioCtx(){
+  try{ actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === "suspended") actx.resume(); }catch(e){ actx = null; }
+  return actx;
+}
+document.addEventListener("pointerdown", audioCtx, true);
+document.addEventListener("keydown", audioCtx, true);
+function sound(kind){
+  if (state.settings.soundOn === false) return;
+  const ctx = audioCtx(); if (!ctx) return;
+  const tunes = {
+    scan: [[1568, 0, 0.13, "square", 0.06]],
+    done: [[784, 0, 0.14, "triangle", 0.25], [988, 0.14, 0.14, "triangle", 0.25], [1175, 0.28, 0.14, "triangle", 0.25], [1568, 0.42, 0.32, "triangle", 0.25]],
+    err:  [[392, 0, 0.22, "sine", 0.3], [294, 0.24, 0.36, "sine", 0.3]]
+  };
+  const t0 = ctx.currentTime + 0.02;
+  (tunes[kind] || []).forEach(([f, at, dur, type, vol]) => {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t0 + at);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + at + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + dur);
+    o.connect(g); g.connect(ctx.destination); o.start(t0 + at); o.stop(t0 + at + dur + 0.05);
+  });
+}
+
+/* ===================== Hand-held scanner (types the barcode then Enter) ===================== */
+let kbuf = "", klast = 0, toastTimer = null;
+function toast(msg){ const t = $("toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("on"), 6000); }
+document.addEventListener("keydown", e => {
+  const tnow = performance.now();
+  if (tnow - klast > 100) kbuf = "";
+  klast = tnow;
+  const t = e.target, inField = t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName);
+  if (/^\d$/.test(e.key)){ kbuf += e.key; return; }
+  if ((e.key === "Enter" || e.key === "Tab") && /^\d{8,14}$/.test(kbuf)){
+    const code = kbuf; kbuf = "";
+    e.preventDefault();
+    if (inField && typeof t.value === "string" && t.value.endsWith(code)){ t.value = t.value.slice(0, -code.length); t.dispatchEvent(new Event("input", { bubbles: true })); }
+    handheldScan(code);
+  }
+}, true);
+function handheldScan(code){
+  armIdle();
+  if (current === "sscan") return onStaffScan(code);
+  if (current === "pin" || current === "staff") return;
+  if (current === "scan" || current === "choose"){ if (current === "choose") setScanMsg("", ""); return handheldFamily(code, mode); }
+  handheldFamily(code, null);
+}
+function handheldFamily(code, forced){
+  const copies = booksByCode(code);
+  if (!copies.length){ sound("err"); toast("We don't know that barcode yet. Please tap Borrow a book, then Choose the book."); return; }
+  const outCopy = copies.find(b => openLoan(b.id));
+  const free = copies.find(b => !b.missing && !openLoan(b.id));
+  let m = forced || (outCopy ? "return" : "borrow");
+  if (m === "borrow" && !free){ sound("err"); toast(copies[0].title + " is already signed out. If you are bringing it back, scan it again from the home screen."); if (!forced) return; return; }
+  if (m === "return" && !outCopy){ sound("err"); toast(copies[0].title + " is already on the shelf, so there is nothing to return. Thank you!"); return; }
+  mode = m; sound("scan");
+  pickBook(m === "borrow" ? free : outCopy);
 }
 
 /* ===================== Wire up ===================== */
