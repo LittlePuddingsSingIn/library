@@ -273,7 +273,7 @@
 /* =====================================================
    CONFIG: same Microsoft app as the OTJ and planning tools
    ===================================================== */
-const BUILD = "2026-10-24c";
+const BUILD = "2026-10-25a";
 const CLIENT_ID    = "5a871fc6-d672-401e-a5a7-f9fb349ecc99";
 const TENANT_ID    = "a824d7c9-201d-4ae2-afea-e75389e576f0";
 const REDIRECT_URI = "https://littlepuddingssingin.github.io/library/";
@@ -515,7 +515,7 @@ function stopScan(){
 let current = "home";
 const SCREENS = { home:"scrHome", scan:"scrScan", choose:"scrChoose", initials:"scrInitials", ret:"scrReturn", done:"scrDone", pin:"scrPin", staff:"scrStaff", sscan:"scrStaffScan" };
 const STAFF_SCREENS = ["staff","pin","sscan"];
-function idleFor(name){ return name === "done" ? 8000 : (name === "staff" || name === "sscan") ? 600000 : 120000; }
+function idleFor(name){ return name === "done" ? 8000 : STAFF_SCREENS.includes(name) ? 60000 : 120000; }
 function go(name){
   if (cam.video && name !== current) stopScan();
   current = name;
@@ -537,6 +537,7 @@ document.addEventListener("click", e => {
   armIdle();
 });
 document.addEventListener("input", armIdle);
+document.addEventListener("keydown", armIdle);
 
 /* Home shelf */
 function spineHtml(b, extra){
@@ -563,6 +564,7 @@ function startFlow(m){
 }
 function setScanMsg(text, cls){ const m = $("scanMsg"); m.className = "scanmsg" + (cls ? " " + cls : ""); m.textContent = text; }
 function onFamilyScan(code){
+  armIdle();
   const copies = booksByCode(code);
   if (!copies.length){ setScanMsg("We don't know that barcode yet. Please tap Choose the book, or ask a member of staff.", "warn"); return; }
   const title = copies[0].title;
@@ -783,6 +785,7 @@ async function lookupTitle(isbn){
   return t;
 }
 async function onStaffScan(code){
+  armIdle();
   if (pending) return;
   const linked = booksByCode(code);
   if (sscanFor){
